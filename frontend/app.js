@@ -4,6 +4,7 @@ const API_BASE = '/api/v1';
 
 let conversationId = null;
 let isSending = false;
+let currentDepth = null;
 
 // Depth level display config
 const DEPTH_DISPLAY = {
@@ -12,6 +13,37 @@ const DEPTH_DISPLAY = {
     Level2: { label: 'Level 2', desc: '深入分析', color: '#f59e0b' },
     Level3: { label: 'Level 3', desc: '完整报告', color: '#ef4444' },
 };
+
+// Action button config: what each button sends, which level it targets
+const ACTIONS = [
+    {
+        id: 'expand',
+        label: '展开',
+        icon: '↕',
+        message: '展开',
+        targetLevel: 1,
+        levelClass: '',
+        minDepthUpgrade: 0, // upgrades from Level0 to Level1
+    },
+    {
+        id: 'deep',
+        label: '详细分析',
+        icon: '→',
+        message: '详细分析',
+        targetLevel: 2,
+        levelClass: 'level-2',
+        minDepthUpgrade: 1, // upgrades from Level0/1 to Level2
+    },
+    {
+        id: 'report',
+        label: '完整报告',
+        icon: '◆',
+        message: '完整报告',
+        targetLevel: 3,
+        levelClass: 'level-3',
+        minDepthUpgrade: 2, // upgrades from any lower level to Level3
+    },
+];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -28,6 +60,7 @@ function fillQuestion(text) {
 // New chat
 function newChat() {
     conversationId = null;
+    currentDepth = null;
     document.getElementById('messages').innerHTML = '';
     document.getElementById('welcome').style.display = 'flex';
     document.getElementById('depthBar').style.display = 'none';
@@ -49,7 +82,56 @@ function autoResize(el) {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
-// Send message with timeout and retry
+// Send an action button command as the next message
+async function sendAction(actionMessage) {
+    if (isSending) return;
+
+    document.getElementById('welcome').style.display = 'none';
+    addMessage('user', actionMessage);
+    const typingEl = showTyping();
+
+    isSending = true;
+    document.getElementById('btnSend').disabled = true;
+
+    try {
+        const data = await fetchWithTimeout(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: actionMessage,
+                conversation_id: conversationId,
+            }),
+        }, 180000);
+
+        if (data.code === 0) {
+            conversationId = data.data.conversation_id;
+            typingEl.remove();
+            addMessage('assistant', data.data.response, {
+                intent: data.data.intent,
+                depth: data.data.depth,
+                confidence: data.data.intent_confidence,
+                wordRange: data.data.word_range,
+            });
+            updateDepthBar(data.data);
+        } else {
+            typingEl.remove();
+            addMessage('assistant', `抱歉，${data.message || '处理请求时出现错误'}。请稍后重试。`);
+        }
+    } catch (error) {
+        typingEl.remove();
+        if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+            addMessage('assistant', '响应超时，AI 正在思考中。请稍后重试，或尝试简化问题。');
+        } else {
+            addMessage('assistant', '网络错误，请检查连接后重试。');
+        }
+    } finally {
+        isSending = false;
+        document.getElementById('btnSend').disabled = false;
+        document.getElementById('userInput').focus();
+    }
+}
+
+// Send message from input
 async function sendMessage() {
     const input = document.getElementById('userInput');
     const message = input.value.trim();
@@ -60,13 +142,8 @@ async function sendMessage() {
     autoResize(input);
     document.getElementById('btnSend').disabled = true;
 
-    // Hide welcome
     document.getElementById('welcome').style.display = 'none';
-
-    // Add user message
     addMessage('user', message);
-
-    // Show typing
     const typingEl = showTyping();
 
     try {
@@ -77,23 +154,17 @@ async function sendMessage() {
                 message: message,
                 conversation_id: conversationId,
             }),
-        }, 180000); // 3 minutes timeout for AI response
+        }, 180000);
 
         if (data.code === 0) {
             conversationId = data.data.conversation_id;
-
-            // Remove typing indicator
             typingEl.remove();
-
-            // Add assistant message
             addMessage('assistant', data.data.response, {
                 intent: data.data.intent,
                 depth: data.data.depth,
                 confidence: data.data.intent_confidence,
                 wordRange: data.data.word_range,
             });
-
-            // Update depth bar
             updateDepthBar(data.data);
         } else {
             typingEl.remove();
@@ -101,7 +172,6 @@ async function sendMessage() {
             addMessage('assistant', `抱歉，${errorMsg}。请稍后重试。`);
         }
     } catch (error) {
-        console.error('Error:', error);
         typingEl.remove();
         if (error.name === 'AbortError' || error.name === 'TimeoutError') {
             addMessage('assistant', '响应超时，AI 正在思考中。请稍后重试，或尝试简化问题。');
@@ -153,7 +223,7 @@ function addMessage(role, content, meta = null) {
         `;
     }
 
-    // Format content - convert markdown-like formatting
+    // Format content
     let formattedContent = content
         .replace(/【([^】]+)】/g, '<strong style="color: var(--accent-light); display: block; margin-top: 12px; margin-bottom: 4px; font-size: 14px;">$1</strong>')
         .replace(/---/g, '')
@@ -165,6 +235,26 @@ function addMessage(role, content, meta = null) {
     `;
 
     messagesEl.appendChild(messageEl);
+
+    // Add action buttons for assistant responses
+    if (role === 'assistant' && meta) {
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'message-actions';
+
+        const depthNum = parseInt((meta.depth || 'Level1').replace('Level', ''));
+
+        ACTIONS.forEach(action => {
+            const btn = document.createElement('button');
+            btn.className = `btn-action ${action.levelClass}`;
+            btn.innerHTML = `<span class="action-icon">${action.icon}</span><span class="action-label">${action.label}</span>`;
+            btn.disabled = depthNum >= action.targetLevel || isSending;
+            btn.onclick = () => sendAction(action.message);
+            actionsEl.appendChild(btn);
+        });
+
+        messagesEl.appendChild(actionsEl);
+    }
+
     scrollToBottom();
 }
 
@@ -194,6 +284,7 @@ function updateDepthBar(data) {
     bar.style.display = 'flex';
 
     const depthInfo = DEPTH_DISPLAY[data.depth] || DEPTH_DISPLAY.Level1;
+    currentDepth = data.depth;
 
     document.getElementById('depthLabel').textContent = depthInfo.label;
     document.getElementById('depthLabel').style.color = depthInfo.color;
