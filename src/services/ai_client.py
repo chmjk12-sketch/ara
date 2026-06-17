@@ -27,7 +27,7 @@ async def call_deepseek(
     messages: list,
     temperature: float = 0.7,
     max_tokens: int = 4096,
-    retries: int = 2,
+    retries: int = 1,
 ) -> str:
     """Call DeepSeek API and return the response content."""
     url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
