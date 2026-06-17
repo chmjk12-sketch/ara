@@ -55,6 +55,8 @@ jobs:
               -e CP_BASE_URL=${{ secrets.ACP_BASE_URL }} \
               -e AGENT_SLUG=${{ secrets.AGENT_SLUG }} \
               -e AGENT_ID=${{ secrets.AGENT_ID }} \
+              -e NOTION_TOKEN=${{ secrets.NOTION_TOKEN }} \
+              -e NOTION_PARENT_PAGE_ID=${{ secrets.NOTION_PARENT_PAGE_ID }} \
               ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
             sleep 5
             curl -sf http://127.0.0.1:${{ env.APP_PORT }}/health && echo "HEALTH_OK" || echo "HEALTH_FAIL"
@@ -135,4 +137,3 @@ jobs:
           curl -sf "http://${{ secrets.DEPLOY_HOST }}:${{ env.APP_PORT }}/health" && echo " OK" || echo " FAIL"
           echo "=== Stage 2: HTTPS ==="
           curl -skf "https://ara.chmjk67.top/health" && echo " OK" || echo " FAIL (DNS may take a few minutes)"
-# trigger rebuild
