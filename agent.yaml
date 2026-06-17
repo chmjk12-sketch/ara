@@ -1,0 +1,9 @@
+name: ara
+version: "1.0.0"
+description: "Adaptive Reality Agent - 自适应深度的现象分析Agent，像咨询顾问一样逐层展开思考"
+author: "ARA Team"
+model: deepseek-chat
+endpoint: http://ara_app:80
+port: 80
+healthCheckPath: /health
+healthCheckInterval: 30
