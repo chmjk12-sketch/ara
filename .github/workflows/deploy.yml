@@ -135,3 +135,4 @@ jobs:
           curl -sf "http://${{ secrets.DEPLOY_HOST }}:${{ env.APP_PORT }}/health" && echo " OK" || echo " FAIL"
           echo "=== Stage 2: HTTPS ==="
           curl -skf "https://ara.chmjk67.top/health" && echo " OK" || echo " FAIL (DNS may take a few minutes)"
+# trigger rebuild
