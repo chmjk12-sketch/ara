@@ -1,0 +1,134 @@
+name: Deploy ARA
+
+on:
+  push:
+    branches: [main]
+
+env:
+  APP_NAME: ara
+  APP_PORT: "8091"
+  REGISTRY_URL: crpi-2hhvyuuzflfxsyey.cn-beijing.personal.cr.aliyuncs.com
+  REGISTRY_NAMESPACE: chmjk67
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Aliyun Container Registry
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login \
+            ${{ env.REGISTRY_URL }} \
+            --username "${{ secrets.REGISTRY_USERNAME }}" \
+            --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }} \
+                      ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
+
+      - name: Deploy to ECS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            docker login ${{ env.REGISTRY_URL }} \
+              --username "${{ secrets.REGISTRY_USERNAME }}" \
+              --password "${{ secrets.REGISTRY_PASSWORD }}"
+            docker pull ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
+            docker stop ara_app 2>/dev/null || true
+            docker rm ara_app 2>/dev/null || true
+            docker run -d \
+              --name ara_app \
+              --restart unless-stopped \
+              -p ${{ env.APP_PORT }}:80 \
+              -e DEEPSEEK_API_KEY="${{ secrets.DEEPSEEK_API_KEY }}" \
+              -e DEEPSEEK_BASE_URL="${{ secrets.DEEPSEEK_BASE_URL }}" \
+              -e CP_API_KEY="${{ secrets.API_KEY }}" \
+              -e CP_BASE_URL="${{ secrets.ACP_BASE_URL }}" \
+              -e AGENT_SLUG="${{ secrets.AGENT_SLUG }}" \
+              -e AGENT_ID="${{ secrets.AGENT_ID }}" \
+              ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
+
+      - name: Configure Caddy Reverse Proxy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Ensure Caddyfile has ara config
+            if ! grep -q "ara.chmjk67.top" /etc/caddy/Caddyfile; then
+              cat >> /etc/caddy/Caddyfile << 'EOF'
+
+            ara.chmjk67.top {
+                reverse_proxy localhost:${{ env.APP_PORT }}
+            }
+            EOF
+            fi
+            caddy reload --config /etc/caddy/Caddyfile
+
+      - name: Configure DNS
+        run: |
+          pip install aliyun-python-sdk-core aliyun-python-sdk-alidns
+          python3 << 'PYEOF'
+          from aliyunsdkcore.client import AcsClient
+          from aliyunsdkalidns.request.v20150109.AddDomainRecordRequest import AddDomainRecordRequest
+          from aliyunsdkalidns.request.v20150109.DescribeDomainRecordsRequest import DescribeDomainRecordsRequest
+          import json
+
+          client = AcsClient(
+              "${{ secrets.ALIYUN_ACCESS_KEY_ID }}",
+              "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}",
+              "cn-beijing"
+          )
+
+          # Check if record exists
+          req = DescribeDomainRecordsRequest()
+          req.set_DomainName("chmjk67.top")
+          req.set_RRKeyWord("ara")
+          resp = client.do_action_with_exception(req)
+          records = json.loads(resp)["DomainRecords"]["Record"]
+
+          exists = any(r["RR"] == "ara" and r["Type"] == "A" for r in records)
+          if not exists:
+              add_req = AddDomainRecordRequest()
+              add_req.set_DomainName("chmjk67.top")
+              add_req.set_RR("ara")
+              add_req.set_Type("A")
+              add_req.set_Value("${{ secrets.DEPLOY_HOST }}")
+              client.do_action_with_exception(add_req)
+              print("DNS record created")
+          else:
+              print("DNS record already exists")
+          PYEOF
+
+      - name: Notify ACP of deployment
+        run: |
+          python3 << 'PYEOF'
+          import requests
+          ACP = "${{ secrets.ACP_BASE_URL }}"
+          AGENT_ID = "${{ secrets.AGENT_ID }}"
+          requests.post(f"{ACP}/api/agents/{AGENT_ID}/versions", json={
+              "versionTag": "${{ github.sha }}"[0:7],
+              "codeRef": "https://github.com/chmjk12-sketch/${{ env.APP_NAME }}",
+          })
+          requests.post(f"{ACP}/api/deployments", json={
+              "agentId": AGENT_ID,
+              "gitCommit": "${{ github.sha }}",
+              "imageTag": "${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}",
+              "slot": "blue", "trafficWeight": 100,
+              "status": "success", "triggerSource": "github_actions",
+          })
+          requests.post(f"{ACP}/api/agents/{AGENT_ID}/online")
+          PYEOF
