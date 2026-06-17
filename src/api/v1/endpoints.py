@@ -3,12 +3,15 @@ ARA - Business Endpoints
 """
 import time
 import uuid
+import logging
 from fastapi import APIRouter
 from src.models.schemas import ChatRequest, ChatResponse
 from src.engine.intent import detect_intent
 from src.engine.depth import determine_depth, get_depth_config
 from src.engine.reality import build_system_prompt, build_response_prompt
 from src.services.ai_client import call_deepseek
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -59,10 +62,34 @@ async def chat(request: ChatRequest):
     )
 
     # Step 4: Call AI
-    response_content = await call_deepseek(
-        system_prompt=system_prompt,
-        messages=ai_messages,
-    )
+    try:
+        response_content = await call_deepseek(
+            system_prompt=system_prompt,
+            messages=ai_messages,
+        )
+    except ValueError as e:
+        # API Key error
+        logger.error(f"API Key error: {e}")
+        return ChatResponse(
+            code=1001,
+            data={"error": str(e)},
+            message="API Key 配置错误",
+        )
+    except ConnectionError as e:
+        # API call failed after retries
+        logger.error(f"API call failed: {e}")
+        return ChatResponse(
+            code=1002,
+            data={"error": str(e)},
+            message="AI 服务暂时不可用，请稍后重试",
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return ChatResponse(
+            code=1003,
+            data={"error": str(e)},
+            message="内部错误",
+        )
 
     # Update history
     conv["history"].append(
