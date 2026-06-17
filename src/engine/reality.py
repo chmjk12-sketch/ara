@@ -125,7 +125,10 @@ def build_response_prompt(
 
     # Add history (last 10 messages max)
     for msg in history[-10:]:
-        messages.append({"role": msg.role, "content": msg.content})
+        if isinstance(msg, dict):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        else:
+            messages.append({"role": msg.role, "content": msg.content})
 
     # Add current message
     messages.append({"role": "user", "content": message})
