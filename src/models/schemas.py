@@ -55,3 +55,24 @@ class MetricsResponse(BaseModel):
     total_requests: int = 0
     active_conversations: int = 0
     avg_response_time_ms: float = 0.0
+
+
+# Export models
+class ExportPdfRequest(BaseModel):
+    title: str
+    content: str
+    intent: str = "Reality"
+    depth: str = "Level1"
+    word_range: str = "300~800字"
+
+
+class ExportNotionRequest(BaseModel):
+    title: str
+    content: str
+    parent_page_id: Optional[str] = None
+
+
+class ExportResponse(BaseModel):
+    code: int = 0
+    data: dict
+    message: str = "ok"
