@@ -5,11 +5,17 @@ import time
 import uuid
 import logging
 from fastapi import APIRouter
-from src.models.schemas import ChatRequest, ChatResponse
+from fastapi.responses import StreamingResponse
+from src.models.schemas import (
+    ChatRequest, ChatResponse,
+    ExportPdfRequest, ExportNotionRequest, ExportResponse,
+)
 from src.engine.intent import detect_intent
 from src.engine.depth import determine_depth, get_depth_config
 from src.engine.reality import build_system_prompt, build_response_prompt
 from src.services.ai_client import call_deepseek
+from src.services.pdf_service import generate_pdf
+from src.services.notion_service import save_to_notion
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +68,6 @@ async def chat(request: ChatRequest):
     )
 
     # Step 4: Call AI
-    # Adjust max_tokens based on depth to avoid timeout on long responses
     max_tokens_map = {
         "Level0": 1024,
         "Level1": 2048,
@@ -78,7 +83,6 @@ async def chat(request: ChatRequest):
             max_tokens=max_tokens,
         )
     except ValueError as e:
-        # API Key error
         logger.error(f"API Key error: {e}")
         return ChatResponse(
             code=1001,
@@ -86,7 +90,6 @@ async def chat(request: ChatRequest):
             message="API Key 配置错误",
         )
     except ConnectionError as e:
-        # API call failed after retries
         logger.error(f"API call failed: {e}")
         return ChatResponse(
             code=1002,
@@ -158,3 +161,62 @@ async def analyze(request: ChatRequest):
         },
         message="ok",
     )
+
+
+# ========== Export Endpoints ==========
+
+@router.post("/export/pdf")
+async def export_pdf(request: ExportPdfRequest):
+    """Export conversation content as PDF."""
+    try:
+        pdf_bytes = generate_pdf(
+            title=request.title,
+            content=request.content,
+            intent=request.intent,
+            depth=request.depth,
+            word_range=request.word_range,
+        )
+        return StreamingResponse(
+            iter([pdf_bytes]),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{request.title.replace(" ", "_")[:30]}.pdf"'
+            },
+        )
+    except Exception as e:
+        logger.error(f"PDF export error: {e}")
+        return ExportResponse(
+            code=2001,
+            data={"error": str(e)},
+            message="PDF 导出失败",
+        )
+
+
+@router.post("/export/notion")
+async def export_notion(request: ExportNotionRequest):
+    """Save conversation content to Notion as a child page."""
+    try:
+        result = save_to_notion(
+            title=request.title,
+            markdown=request.content,
+            parent_page_id=request.parent_page_id,
+        )
+        if result["success"]:
+            return ExportResponse(
+                code=0,
+                data={"notion_url": result["notion_url"]},
+                message="已保存到 Notion",
+            )
+        else:
+            return ExportResponse(
+                code=2002,
+                data={"error": result["error"]},
+                message="Notion 保存失败",
+            )
+    except Exception as e:
+        logger.error(f"Notion export error: {e}")
+        return ExportResponse(
+            code=2003,
+            data={"error": str(e)},
+            message="Notion 保存失败",
+        )
