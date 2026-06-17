@@ -5,6 +5,8 @@ const API_BASE = '/api/v1';
 let conversationId = null;
 let isSending = false;
 let currentDepth = null;
+let lastResponse = null;
+let lastMeta = null;
 
 // Depth level display config
 const DEPTH_DISPLAY = {
@@ -14,7 +16,7 @@ const DEPTH_DISPLAY = {
     Level3: { label: 'Level 3', desc: '完整报告', color: '#ef4444' },
 };
 
-// Action button config: what each button sends, which level it targets
+// Action button config
 const ACTIONS = [
     {
         id: 'expand',
@@ -23,7 +25,7 @@ const ACTIONS = [
         message: '展开',
         targetLevel: 1,
         levelClass: '',
-        minDepthUpgrade: 0, // upgrades from Level0 to Level1
+        minDepthUpgrade: 0,
     },
     {
         id: 'deep',
@@ -32,7 +34,7 @@ const ACTIONS = [
         message: '详细分析',
         targetLevel: 2,
         levelClass: 'level-2',
-        minDepthUpgrade: 1, // upgrades from Level0/1 to Level2
+        minDepthUpgrade: 1,
     },
     {
         id: 'report',
@@ -41,7 +43,7 @@ const ACTIONS = [
         message: '完整报告',
         targetLevel: 3,
         levelClass: 'level-3',
-        minDepthUpgrade: 2, // upgrades from any lower level to Level3
+        minDepthUpgrade: 2,
     },
 ];
 
@@ -61,6 +63,8 @@ function fillQuestion(text) {
 function newChat() {
     conversationId = null;
     currentDepth = null;
+    lastResponse = null;
+    lastMeta = null;
     document.getElementById('messages').innerHTML = '';
     document.getElementById('welcome').style.display = 'flex';
     document.getElementById('depthBar').style.display = 'none';
@@ -82,14 +86,12 @@ function autoResize(el) {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
-// Send an action button command as the next message
+// Send an action button command
 async function sendAction(actionMessage) {
     if (isSending) return;
-
     document.getElementById('welcome').style.display = 'none';
     addMessage('user', actionMessage);
     const typingEl = showTyping();
-
     isSending = true;
     document.getElementById('btnSend').disabled = true;
 
@@ -97,21 +99,15 @@ async function sendAction(actionMessage) {
         const data = await fetchWithTimeout(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: actionMessage,
-                conversation_id: conversationId,
-            }),
+            body: JSON.stringify({ message: actionMessage, conversation_id: conversationId }),
         }, 180000);
 
         if (data.code === 0) {
             conversationId = data.data.conversation_id;
+            lastResponse = data.data.response;
+            lastMeta = { intent: data.data.intent, depth: data.data.depth, confidence: data.data.intent_confidence, wordRange: data.data.word_range };
             typingEl.remove();
-            addMessage('assistant', data.data.response, {
-                intent: data.data.intent,
-                depth: data.data.depth,
-                confidence: data.data.intent_confidence,
-                wordRange: data.data.word_range,
-            });
+            addMessage('assistant', data.data.response, lastMeta);
             updateDepthBar(data.data);
         } else {
             typingEl.remove();
@@ -150,26 +146,19 @@ async function sendMessage() {
         const data = await fetchWithTimeout(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: message,
-                conversation_id: conversationId,
-            }),
+            body: JSON.stringify({ message: message, conversation_id: conversationId }),
         }, 180000);
 
         if (data.code === 0) {
             conversationId = data.data.conversation_id;
+            lastResponse = data.data.response;
+            lastMeta = { intent: data.data.intent, depth: data.data.depth, confidence: data.data.intent_confidence, wordRange: data.data.word_range };
             typingEl.remove();
-            addMessage('assistant', data.data.response, {
-                intent: data.data.intent,
-                depth: data.data.depth,
-                confidence: data.data.intent_confidence,
-                wordRange: data.data.word_range,
-            });
+            addMessage('assistant', data.data.response, lastMeta);
             updateDepthBar(data.data);
         } else {
             typingEl.remove();
-            const errorMsg = data.message || '处理请求时出现错误';
-            addMessage('assistant', `抱歉，${errorMsg}。请稍后重试。`);
+            addMessage('assistant', `抱歉，${data.message || '处理请求时出现错误'}。请稍后重试。`);
         }
     } catch (error) {
         typingEl.remove();
@@ -185,21 +174,104 @@ async function sendMessage() {
     }
 }
 
+// Export to PDF
+async function exportPdf() {
+    if (!lastResponse) {
+        alert('请先进行一次对话，生成分析内容后再导出 PDF');
+        return;
+    }
+    const title = prompt('请输入报告标题:', 'ARA分析报告');
+    if (!title) return;
+
+    const btn = document.getElementById('btnExportPdf');
+    if (btn) btn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/export/pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title,
+                content: lastResponse,
+                intent: lastMeta?.intent || 'Reality',
+                depth: lastMeta?.depth || 'Level1',
+                word_range: lastMeta?.wordRange || '300~800字',
+            }),
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            alert('PDF 导出失败: ' + (err.message || '未知错误'));
+            return;
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.replace(/\s+/g, '_').slice(0, 30)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('PDF 导出失败: ' + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Save to Notion
+async function saveToNotion() {
+    if (!lastResponse) {
+        alert('请先进行一次对话，生成分析内容后再保存到 Notion');
+        return;
+    }
+    const title = prompt('请输入 Notion 页面标题:', 'ARA分析报告');
+    if (!title) return;
+
+    const btn = document.getElementById('btnSaveNotion');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '保存中...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/export/notion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title,
+                content: lastResponse,
+            }),
+        });
+
+        const data = await response.json();
+        if (data.code === 0 && data.data?.notion_url) {
+            if (confirm('已保存到 Notion！是否打开页面？')) {
+                window.open(data.data.notion_url, '_blank');
+            }
+        } else {
+            alert('Notion 保存失败: ' + (data.message || data.data?.error || '未知错误'));
+        }
+    } catch (e) {
+        alert('Notion 保存失败: ' + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '📝 Notion';
+        }
+    }
+}
+
 // Fetch with timeout
 async function fetchWithTimeout(url, options, timeout = 60000) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
-        const response = await fetch(url, {
-            ...options,
-            signal: controller.signal,
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return await response.json();
     } finally {
         clearTimeout(timeoutId);
@@ -213,7 +285,6 @@ function addMessage(role, content, meta = null) {
     messageEl.className = `message ${role}`;
 
     let headerHTML = `<span class="message-role">${role === 'user' ? '你' : 'ARA'}</span>`;
-
     if (meta && role === 'assistant') {
         headerHTML += `
             <div class="message-meta">
@@ -223,7 +294,6 @@ function addMessage(role, content, meta = null) {
         `;
     }
 
-    // Format content
     let formattedContent = content
         .replace(/【([^】]+)】/g, '<strong style="color: var(--accent-light); display: block; margin-top: 12px; margin-bottom: 4px; font-size: 14px;">$1</strong>')
         .replace(/---/g, '')
@@ -233,14 +303,12 @@ function addMessage(role, content, meta = null) {
         <div class="message-header">${headerHTML}</div>
         <div class="message-content">${formattedContent}</div>
     `;
-
     messagesEl.appendChild(messageEl);
 
     // Add action buttons for assistant responses
     if (role === 'assistant' && meta) {
         const actionsEl = document.createElement('div');
         actionsEl.className = 'message-actions';
-
         const depthNum = parseInt((meta.depth || 'Level1').replace('Level', ''));
 
         ACTIONS.forEach(action => {
@@ -251,6 +319,23 @@ function addMessage(role, content, meta = null) {
             btn.onclick = () => sendAction(action.message);
             actionsEl.appendChild(btn);
         });
+
+        // Export buttons
+        const exportPdfBtn = document.createElement('button');
+        exportPdfBtn.className = 'btn-action';
+        exportPdfBtn.id = 'btnExportPdf';
+        exportPdfBtn.innerHTML = '<span class="action-icon">📄</span><span class="action-label">PDF</span>';
+        exportPdfBtn.disabled = isSending;
+        exportPdfBtn.onclick = exportPdf;
+        actionsEl.appendChild(exportPdfBtn);
+
+        const notionBtn = document.createElement('button');
+        notionBtn.className = 'btn-action';
+        notionBtn.id = 'btnSaveNotion';
+        notionBtn.innerHTML = '<span class="action-icon">📝</span><span class="action-label">Notion</span>';
+        notionBtn.disabled = isSending;
+        notionBtn.onclick = saveToNotion;
+        actionsEl.appendChild(notionBtn);
 
         messagesEl.appendChild(actionsEl);
     }
@@ -264,9 +349,7 @@ function showTyping() {
     const typingEl = document.createElement('div');
     typingEl.className = 'message assistant';
     typingEl.innerHTML = `
-        <div class="message-header">
-            <span class="message-role">ARA</span>
-        </div>
+        <div class="message-header"><span class="message-role">ARA</span></div>
         <div class="typing">
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
@@ -282,7 +365,6 @@ function showTyping() {
 function updateDepthBar(data) {
     const bar = document.getElementById('depthBar');
     bar.style.display = 'flex';
-
     const depthInfo = DEPTH_DISPLAY[data.depth] || DEPTH_DISPLAY.Level1;
     currentDepth = data.depth;
 
@@ -292,7 +374,6 @@ function updateDepthBar(data) {
     document.getElementById('intentLabel').textContent = data.intent;
     document.getElementById('wordRange').textContent = data.wordRange;
 
-    // Update depth dots
     const dots = document.querySelectorAll('.depth-dot');
     const level = parseInt(data.depth.replace('Level', ''));
     dots.forEach((dot, i) => {
@@ -305,7 +386,5 @@ function updateDepthBar(data) {
 // Scroll to bottom
 function scrollToBottom() {
     const chatArea = document.getElementById('chatArea');
-    requestAnimationFrame(() => {
-        chatArea.scrollTop = chatArea.scrollHeight;
-    });
+    requestAnimationFrame(() => { chatArea.scrollTop = chatArea.scrollHeight; });
 }
