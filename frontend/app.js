@@ -49,7 +49,7 @@ function autoResize(el) {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
-// Send message
+// Send message with timeout and retry
 async function sendMessage() {
     const input = document.getElementById('userInput');
     const message = input.value.trim();
@@ -70,16 +70,14 @@ async function sendMessage() {
     const typingEl = showTyping();
 
     try {
-        const response = await fetch(`${API_BASE}/chat`, {
+        const data = await fetchWithTimeout(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: message,
                 conversation_id: conversationId,
             }),
-        });
-
-        const data = await response.json();
+        }, 180000); // 3 minutes timeout for AI response
 
         if (data.code === 0) {
             conversationId = data.data.conversation_id;
@@ -99,16 +97,42 @@ async function sendMessage() {
             updateDepthBar(data.data);
         } else {
             typingEl.remove();
-            addMessage('assistant', '抱歉，处理请求时出现错误，请重试。');
+            const errorMsg = data.message || '处理请求时出现错误';
+            addMessage('assistant', `抱歉，${errorMsg}。请稍后重试。`);
         }
     } catch (error) {
         console.error('Error:', error);
         typingEl.remove();
-        addMessage('assistant', '网络错误，请检查连接后重试。');
+        if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+            addMessage('assistant', '响应超时，AI 正在思考中。请稍后重试，或尝试简化问题。');
+        } else {
+            addMessage('assistant', '网络错误，请检查连接后重试。');
+        }
     } finally {
         isSending = false;
         document.getElementById('btnSend').disabled = false;
         document.getElementById('userInput').focus();
+    }
+}
+
+// Fetch with timeout
+async function fetchWithTimeout(url, options, timeout = 60000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
 
