@@ -62,10 +62,20 @@ async def chat(request: ChatRequest):
     )
 
     # Step 4: Call AI
+    # Adjust max_tokens based on depth to avoid timeout on long responses
+    max_tokens_map = {
+        "Level0": 1024,
+        "Level1": 2048,
+        "Level2": 4096,
+        "Level3": 4096,
+    }
+    max_tokens = max_tokens_map.get(depth_result.depth.value, 2048)
+
     try:
         response_content = await call_deepseek(
             system_prompt=system_prompt,
             messages=ai_messages,
+            max_tokens=max_tokens,
         )
     except ValueError as e:
         # API Key error
