@@ -6,3 +6,91 @@
     <title>ARA - Adaptive Reality Agent</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">◆</span>
+                    <span class="logo-text">ARA</span>
+                </div>
+                <span class="header-subtitle">Adaptive Reality Agent</span>
+            </div>
+            <div class="header-right">
+                <button class="btn-new-chat" onclick="newChat()" title="新对话">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <main class="chat-area" id="chatArea">
+            <!-- Welcome Message -->
+            <div class="welcome" id="welcome">
+                <div class="welcome-icon">◆</div>
+                <h1>Adaptive Reality Agent</h1>
+                <p>像顶级咨询顾问一样逐层展开思考</p>
+                <div class="welcome-hints">
+                    <div class="hint-card" onclick="fillQuestion('房价为什么下跌？')">
+                        <span class="hint-type">Reality</span>
+                        <span>房价为什么下跌？</span>
+                    </div>
+                    <div class="hint-card" onclick="fillQuestion('计算机专业还值得读吗？')">
+                        <span class="hint-type">Decision</span>
+                        <span>计算机专业还值得读吗？</span>
+                    </div>
+                    <div class="hint-card" onclick="fillQuestion('产品增长停滞了怎么办？')">
+                        <span class="hint-type">Optimization</span>
+                        <span>产品增长停滞了怎么办？</span>
+                    </div>
+                    <div class="hint-card" onclick="fillQuestion('现在有什么创业机会？')">
+                        <span class="hint-type">Innovation</span>
+                        <span>现在有什么创业机会？</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div class="messages" id="messages"></div>
+        </main>
+
+        <!-- Depth Indicator -->
+        <div class="depth-bar" id="depthBar" style="display:none;">
+            <div class="depth-info">
+                <span class="depth-label" id="depthLabel">Level 1</span>
+                <span class="depth-desc" id="depthDesc">标准分析</span>
+            </div>
+            <div class="depth-levels">
+                <div class="depth-dot" data-level="0"></div>
+                <div class="depth-dot" data-level="1"></div>
+                <div class="depth-dot" data-level="2"></div>
+                <div class="depth-dot" data-level="3"></div>
+            </div>
+            <div class="depth-meta">
+                <span id="intentLabel">Reality</span>
+                <span id="wordRange">300~800字</span>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="input-area">
+            <div class="input-container">
+                <textarea id="userInput" placeholder="输入你的问题..." rows="1" onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                <button class="btn-send" id="btnSend" onclick="sendMessage()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-hint">
+                输入「展开」「详细分析」可逐层深入 · 输入「完整报告」获取全面分析
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
