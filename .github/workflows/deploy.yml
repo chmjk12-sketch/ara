@@ -105,12 +105,11 @@ jobs:
               ' --password=' + os.environ.get('REGISTRY_PASSWORD','') +
               ' ' + REGISTRY_URL + ' 2>/dev/null && '
               'docker pull ' + REGISTRY_URL + '/' + REGISTRY_NAMESPACE + '/' + APP_NAME + ':' + IMAGE_TAG + ' && '
-              'docker stop ara 2>/dev/null; docker rm ara 2>/dev/null; '
-              'docker stop ara_app 2>/dev/null; docker rm ara_app 2>/dev/null; '
+              'docker stop ara 2>/dev/null || true && docker rm -f ara 2>/dev/null || true && '
+              'docker stop ara_app 2>/dev/null || true && docker rm -f ara_app 2>/dev/null || true && '
               'docker run -d --name ' + APP_NAME + ' --restart always -p ' + APP_PORT + ':80 '
-              '-e OPENAI_API_KEY=' + os.environ.get('DEEPSEEK_API_KEY','') + ' '
-              '-e OPENAI_BASE_URL=' + os.environ.get('DEEPSEEK_BASE_URL','https://api.deepseek.com/v1') + ' '
-              '-e OPENAI_MODEL=deepseek-chat '
+              '-e DEEPSEEK_API_KEY=' + os.environ.get('DEEPSEEK_API_KEY','') + ' '
+              '-e DEEPSEEK_BASE_URL=' + os.environ.get('DEEPSEEK_BASE_URL','https://api.deepseek.com/v1') + ' '
               '-e NOTION_TOKEN=' + os.environ.get('NOTION_TOKEN','') + ' '
               '-e NOTION_PARENT_PAGE_ID=' + os.environ.get('NOTION_PARENT_PAGE_ID','') + ' '
               '-e MAX_DEPTH=3 -e DEFAULT_DEPTH=1 -e MAX_TOKENS=4000 -e TEMPERATURE=0.7 '
@@ -180,7 +179,7 @@ jobs:
 
           caddy_cmd = (
               'SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP "src \\K[0-9.]+" || hostname -I | awk "{print \\$1}") && '
-              'printf "%s\\n" "sunshine.chmjk67.top {" "    reverse_proxy sunshine_app:80" "}" "" "ara.chmjk67.top {" "    reverse_proxy ${SERVER_IP}:9000" "}" | docker exec -i caddy tee /etc/caddy/Caddyfile && '
+              'echo "sunshine.chmjk67.top { reverse_proxy sunshine_app:80 } ara.chmjk67.top { reverse_proxy ${SERVER_IP}:9000 }" | tr " " "\\n" | docker exec -i caddy tee /etc/caddy/Caddyfile && '
               'docker exec caddy caddy reload --config /etc/caddy/Caddyfile && '
               'echo Caddy configured'
           )
