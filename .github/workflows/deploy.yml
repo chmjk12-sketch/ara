@@ -28,6 +28,7 @@ jobs:
         with:
           context: .
           push: true
+          no-cache: true
           tags: |
             ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:latest
             ${{ env.REGISTRY_URL }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.APP_NAME }}:${{ github.sha }}
@@ -52,7 +53,7 @@ jobs:
           REGISTRY_NAMESPACE = os.environ['REGISTRY_NAMESPACE']
           APP_NAME = os.environ['APP_NAME']
           APP_PORT = os.environ['APP_PORT']
-          IMAGE_TAG = os.environ['GITHUB_SHA'][:12]
+          IMAGE_TAG = 'latest'
 
           def sign(params):
               sp = sorted(params.items())
@@ -178,8 +179,8 @@ jobs:
                           return
 
           caddy_cmd = (
-              'SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP \"src \\K[0-9.]+\" || hostname -I | awk \"{print \\$1}\") && '
-              'printf \"sunshine.chmjk67.top {\\n    reverse_proxy sunshine_app:80\\n}\\n\\nara.chmjk67.top {\\n    reverse_proxy \\$SERVER_IP:9000\\n}\\n\" | docker exec -i caddy tee /etc/caddy/Caddyfile && '
+              'SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP "src \\K[0-9.]+" || hostname -I | awk "{print \\$1}") && '
+              'printf "%s\\n" "sunshine.chmjk67.top {" "    reverse_proxy sunshine_app:80" "}" "" "ara.chmjk67.top {" "    reverse_proxy ${SERVER_IP}:9000" "}" | docker exec -i caddy tee /etc/caddy/Caddyfile && '
               'docker exec caddy caddy reload --config /etc/caddy/Caddyfile && '
               'echo Caddy configured'
           )
